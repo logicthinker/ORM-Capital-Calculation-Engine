@@ -1,0 +1,373 @@
+# Kubernetes deployment configuration for ORM Capital Calculator Engine
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orm-calculator
+  labels:
+    name: orm-calculator
+    compliance: rbi-cert-in
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orm-calculator-config
+  namespace: orm-calculator
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  METRICS_ENABLED: "true"
+  HEALTH_CHECK_ENDPOINT: "/api/v1/health"
+  ASYNC_THRESHOLD_SECONDS: "60"
+  MAX_CONCURRENT_JOBS: "50"
+  DATA_RESIDENCY_REGION: "IN"
+  CERTINDIA_COMPLIANCE_MODE: "true"
+  RBI_COMPLIANCE_MODE: "true"
+  TIMEZONE: "UTC"
+
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orm-calculator-secrets
+  namespace: orm-calculator
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql+asyncpg://orm_user:CHANGE_ME@postgres-service:5432/orm_calculator"
+  REDIS_URL: "redis://redis-service:6379/0"
+  JWT_SECRET_KEY: "CHANGE_ME_TO_SECURE_RANDOM_STRING"
+  ENCRYPTION_KEY: "CHANGE_ME_TO_32_BYTE_BASE64_ENCODED_KEY"
+  OAUTH2_CLIENT_SECRET: "CHANGE_ME"
+  SOC_API_KEY: "CHANGE_ME"
+
+---
+# Deployment for the main application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orm-calculator-app
+  namespace: orm-calculator
+  labels:
+    app: orm-calculator
+    component: application
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: orm-calculator
+      component: application
+  template:
+    metadata:
+      labels:
+        app: orm-calculator
+        component: application
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # India region node affinity for data residency
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - ap-south-1  # Mumbai
+                - ap-south-2  # Hyderabad
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: orm-calculator
+        image: orm-calculator:latest
+        imagePullPolicy: Always
+        
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        
+        # Environment variables from ConfigMap and Secret
+        envFrom:
+        - configMapRef:
+            name: orm-calculator-config
+        - secretRef:
+            name: orm-calculator-secrets
+        
+        # Resource limits and requests
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Startup probe for slow-starting application
+        startupProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        
+        # Volume mounts
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+        - name: app-data
+          mountPath: /app/data
+        - name: tls-certs
+          mountPath: /app/certs
+          readOnly: true
+        
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      
+      # Volumes
+      volumes:
+      - name: app-logs
+        emptyDir: {}
+      - name: app-data
+        persistentVolumeClaim:
+          claimName: orm-calculator-data
+      - name: tls-certs
+        secret:
+          secretName: orm-calculator-tls
+
+---
+# Service for the application
+apiVersion: v1
+kind: Service
+metadata:
+  name: orm-calculator-service
+  namespace: orm-calculator
+  labels:
+    app: orm-calculator
+    component: application
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: orm-calculator
+    component: application
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orm-calculator-ingress
+  namespace: orm-calculator
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - orm-calculator.your-domain.com
+    secretName: orm-calculator-tls
+  rules:
+  - host: orm-calculator.your-domain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: orm-calculator-service
+            port:
+              number: 8000
+
+---
+# PersistentVolumeClaim for application data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orm-calculator-data
+  namespace: orm-calculator
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
+
+---
+# HorizontalPodAutoscaler for automatic scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orm-calculator-hpa
+  namespace: orm-calculator
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orm-calculator-app
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orm-calculator-pdb
+  namespace: orm-calculator
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: orm-calculator
+      component: application
+
+---
+# NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orm-calculator-netpol
+  namespace: orm-calculator
+spec:
+  podSelector:
+    matchLabels:
+      app: orm-calculator
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: cache
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 443
+
+---
+# ServiceMonitor for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: orm-calculator-metrics
+  namespace: orm-calculator
+  labels:
+    app: orm-calculator
+spec:
+  selector:
+    matchLabels:
+      app: orm-calculator
+      component: application
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s

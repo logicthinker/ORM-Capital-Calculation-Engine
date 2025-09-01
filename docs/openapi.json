@@ -1,0 +1,702 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "ORM Capital Calculator Engine",
+    "description": "RBI Basel III SMA Compliance System\n\nA comprehensive system for calculating operational risk capital requirements in compliance with RBI's Basel III Standardized Measurement Approach (SMA).\n\n## Features\n\n* **Job-based API**: Synchronous and asynchronous calculation execution\n* **Multiple Methods**: SMA, BIA, TSA, and what-if scenarios\n* **Data Lineage**: Complete audit trail and reproducibility\n* **Parameter Management**: Governed parameter updates with maker-checker workflow\n* **Webhook Notifications**: Real-time job completion notifications\n* **Comprehensive Validation**: Input validation with detailed error messages\n\n## Authentication\n\nThis API uses OAuth 2.0 client credentials flow for authentication.\nInclude the `Authorization: Bearer <token>` header in your requests.\n\n## Rate Limiting\n\nAPI requests are rate-limited to ensure system stability:\n* 100 requests per minute for calculation endpoints\n* 1000 requests per minute for status/health endpoints\n\n## Error Handling\n\nAll errors follow a standardized format:\n```json\n{\n    \"error_code\": \"ERROR_CODE\",\n    \"error_message\": \"Human readable message\",\n    \"details\": {\n        \"additional\": \"context\"\n    }\n}\n```",
+    "version": "0.1.0",
+    "contact": {
+      "name": "ORM Capital Calculator Support",
+      "email": "support@example.com"
+    },
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "API Version 1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "System health and monitoring endpoints"
+    },
+    {
+      "name": "calculations",
+      "description": "Capital calculation operations with job management"
+    },
+    {
+      "name": "loss-data",
+      "description": "Loss data management and validation"
+    },
+    {
+      "name": "lineage",
+      "description": "Data lineage tracking and audit trail access"
+    },
+    {
+      "name": "parameters",
+      "description": "Parameter management with governance workflow"
+    },
+    {
+      "name": "analytics",
+      "description": "Stress testing and scenario analysis"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Basic Health Check",
+        "description": "Basic health check endpoint (no authentication required)",
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "System is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Readiness Check",
+        "description": "Kubernetes readiness probe endpoint",
+        "operationId": "readiness_check",
+        "responses": {
+          "200": {
+            "description": "Service is ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Liveness Check",
+        "description": "Kubernetes liveness probe endpoint",
+        "operationId": "liveness_check",
+        "responses": {
+          "200": {
+            "description": "Service is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service not alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/startup": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Startup Check",
+        "description": "Kubernetes startup probe endpoint",
+        "operationId": "startup_check",
+        "responses": {
+          "200": {
+            "description": "Startup complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartupStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Startup in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartupStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/metrics": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Prometheus Metrics",
+        "description": "Prometheus metrics endpoint",
+        "operationId": "prometheus_metrics",
+        "responses": {
+          "200": {
+            "description": "Metrics in Prometheus format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calculation-jobs": {
+      "post": {
+        "tags": ["calculations"],
+        "summary": "Create Calculation Job",
+        "description": "Create a new calculation job (sync or async)",
+        "operationId": "create_calculation_job",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalculationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Synchronous calculation completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationJobResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Asynchronous job queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calculation-jobs/{job_id}": {
+      "get": {
+        "tags": ["calculations"],
+        "summary": "Get Job Status",
+        "description": "Retrieve job status and results",
+        "operationId": "get_job_status",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Job identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status and results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lineage/{run_id}": {
+      "get": {
+        "tags": ["lineage"],
+        "summary": "Get Calculation Lineage",
+        "description": "Retrieve complete data lineage for a calculation run",
+        "operationId": "get_calculation_lineage",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Run identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete lineage information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteLineage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "unhealthy"]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["status", "timestamp", "version"]
+      },
+      "ReadinessStatus": {
+        "type": "object",
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": ["ready", "timestamp", "checks"]
+      },
+      "LivenessStatus": {
+        "type": "object",
+        "properties": {
+          "alive": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "uptime_seconds": {
+            "type": "number"
+          }
+        },
+        "required": ["alive", "timestamp", "uptime_seconds"]
+      },
+      "StartupStatus": {
+        "type": "object",
+        "properties": {
+          "started": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "initialization_complete": {
+            "type": "boolean"
+          },
+          "startup_time_seconds": {
+            "type": "number"
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": ["started", "timestamp", "initialization_complete", "startup_time_seconds", "checks"]
+      },
+      "CalculationRequest": {
+        "type": "object",
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "enum": ["sma", "bia", "tsa", "what-if"]
+          },
+          "execution_mode": {
+            "type": "string",
+            "enum": ["sync", "async"]
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "calculation_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "callback_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string"
+          }
+        },
+        "required": ["model_name", "execution_mode", "entity_id", "calculation_date"]
+      },
+      "CalculationJobResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["completed", "failed"]
+          },
+          "results": {
+            "$ref": "#/components/schemas/CalculationResults"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "calculation_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processing_time_seconds": {
+            "type": "number"
+          }
+        },
+        "required": ["job_id", "status", "run_id"]
+      },
+      "JobResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running"]
+          },
+          "estimated_completion_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "callback_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["job_id", "status", "created_at"]
+      },
+      "JobStatusResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running", "completed", "failed"]
+          },
+          "progress_percentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processing_time_seconds": {
+            "type": "number"
+          },
+          "result_available": {
+            "type": "boolean"
+          },
+          "results": {
+            "$ref": "#/components/schemas/CalculationResults"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "error_details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["job_id", "status", "result_available"]
+      },
+      "CalculationResults": {
+        "type": "object",
+        "properties": {
+          "business_indicator": {
+            "type": "number",
+            "description": "Business Indicator (BI) amount"
+          },
+          "business_indicator_component": {
+            "type": "number",
+            "description": "Business Indicator Component (BIC) amount"
+          },
+          "loss_component": {
+            "type": "number",
+            "description": "Loss Component (LC) amount"
+          },
+          "internal_loss_multiplier": {
+            "type": "number",
+            "description": "Internal Loss Multiplier (ILM)"
+          },
+          "operational_risk_capital": {
+            "type": "number",
+            "description": "Operational Risk Capital (ORC) amount"
+          },
+          "risk_weighted_assets": {
+            "type": "number",
+            "description": "Risk Weighted Assets (RWA) amount"
+          },
+          "bucket": {
+            "type": "integer",
+            "enum": [1, 2, 3],
+            "description": "SMA bucket classification"
+          },
+          "methodology": {
+            "type": "string",
+            "enum": ["sma", "bia", "tsa"],
+            "description": "Calculation methodology used"
+          },
+          "calculation_metadata": {
+            "type": "object",
+            "properties": {
+              "ilm_gate_applied": {
+                "type": "boolean"
+              },
+              "data_quality_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "loss_events_included": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "required": ["operational_risk_capital", "risk_weighted_assets", "methodology"]
+      },
+      "CompleteLineage": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "final_outputs": {
+            "type": "object",
+            "properties": {
+              "orc": {
+                "type": "number"
+              },
+              "rwa": {
+                "type": "number"
+              }
+            }
+          },
+          "intermediates": {
+            "type": "object",
+            "properties": {
+              "bi": {
+                "type": "number"
+              },
+              "bic": {
+                "type": "number"
+              },
+              "lc": {
+                "type": "number"
+              },
+              "ilm": {
+                "type": "number"
+              }
+            }
+          },
+          "parameter_versions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model_name": {
+                  "type": "string"
+                },
+                "version_id": {
+                  "type": "string"
+                },
+                "effective_date": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
+            }
+          },
+          "included_loss_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "environment_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reproducible": {
+            "type": "boolean"
+          }
+        },
+        "required": ["run_id", "final_outputs", "created_at", "reproducible"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["error_code", "error_message"]
+      }
+    }
+  }
+}
